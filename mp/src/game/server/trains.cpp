@@ -1516,7 +1516,9 @@ void CFuncTrackTrain::InputSetSpeedDirAccel( inputdata_t &inputdata )
 void CFuncTrackTrain::SetSpeedDirAccel( float flNewSpeed )
 {
 	float newSpeed = flNewSpeed;
-	SetDirForward( newSpeed >= 0 );
+	if (newSpeed != 0) { //Don't change the forward dir if we're trying to stop
+		SetDirForward(newSpeed >= 0);
+	}
 	newSpeed = fabs( newSpeed );
 	float flScale = clamp( newSpeed, 0.f, 1.f );
 	SetSpeed( m_maxSpeed * flScale, true );
