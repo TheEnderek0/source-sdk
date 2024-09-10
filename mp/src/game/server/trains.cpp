@@ -1259,6 +1259,7 @@ CFuncTrackTrain::CFuncTrackTrain()
 
 	m_flSpeedForwardModifier = 1.0f;
 	m_flUnmodifiedDesiredSpeed = 0.0f;
+	m_flDesiredSpeed2 = 0.0f;
 
 	m_bDamageChild = false;
 }
@@ -1516,10 +1517,10 @@ void CFuncTrackTrain::InputSetSpeedDirAccel( inputdata_t &inputdata )
 void CFuncTrackTrain::SetSpeedDirAccel( float flNewSpeed )
 {
 	float newSpeed = flNewSpeed;
-	SetDirForward( newSpeed >= 0 );
 	newSpeed = fabs( newSpeed );
+	int speed_dir = flNewSpeed != newSpeed ? -1 : 1; //Evaluates to -1 if these are not the same (they have the same value but they may not have the same sign), -1 means backwards movement
 	float flScale = clamp( newSpeed, 0.f, 1.f );
-	SetSpeed( m_maxSpeed * flScale, true );
+	SetSpeed( m_maxSpeed * flScale, true, speed_dir);
 }
 
 //-----------------------------------------------------------------------------
@@ -1560,7 +1561,7 @@ void CFuncTrackTrain::InputTeleportToPathTrack( inputdata_t &inputdata )
 //-----------------------------------------------------------------------------
 // Purpose: Sets the speed of the train to the given value in units per second.
 //-----------------------------------------------------------------------------
-void CFuncTrackTrain::SetSpeed( float flSpeed, bool bAccel /*= false */  )
+void CFuncTrackTrain::SetSpeed( float flSpeed, bool bAccel /* = false */, int desired_speed_direction /*= 1*/)
 {
 	m_bAccelToSpeed = bAccel;
 
@@ -1575,7 +1576,24 @@ void CFuncTrackTrain::SetSpeed( float flSpeed, bool bAccel /*= false */  )
 
 	if ( m_bAccelToSpeed )
 	{
-		m_flDesiredSpeed = fabs( flSpeed ) * m_dir;
+
+		float signedFlSpeed = flSpeed * desired_speed_direction;
+
+		//Double tweens, like -1 -> 1, that goes -1 -> 0 -> 1
+		if ((signedFlSpeed < 0) != (m_flSpeed < 0) && signedFlSpeed != 0.f && m_flSpeed != 0.f ) { //We want to reverse directions, but only if we're already moving, so ensure not any of the values are zero
+			//We're not running SetDirForward yet, as firstly we want to stop and then reverse direction
+			m_flDesiredSpeed = 0;
+			m_flDesiredSpeed2 = signedFlSpeed;
+		}
+		else { // Normal tweens, like 0 -> 1, or -1 -> 0 etc
+			if (signedFlSpeed != 0) {
+				SetDirForward(signedFlSpeed >= 0); //Ensure we're on the right direction
+			}
+			m_flDesiredSpeed = fabs(flSpeed) * m_dir;
+			m_flDesiredSpeed2 = m_flDesiredSpeed;
+		}
+
+		
 		m_flSpeedChangeTime = gpGlobals->curtime;
 
 		if ( m_flSpeed == 0 && abs(m_flDesiredSpeed) > 0 )
@@ -1930,7 +1948,7 @@ TrainVelocityType_t CFuncTrackTrain::GetTrainVelocityType()
 // Purpose: 
 // Input  : *pnext - 
 //-----------------------------------------------------------------------------
-void CFuncTrackTrain::UpdateTrainVelocity( CPathTrack *pPrev, CPathTrack *pNext, const Vector &nextPos, float flInterval )
+void CFuncTrackTrain::UpdateTrainVelocity( CPathTrack *pPrev, CPathTrack *pNext, const Vector &nextPos, float flInterval, bool &dir_changed)
 {
 	switch ( GetTrainVelocityType() )
 	{
@@ -1950,11 +1968,24 @@ void CFuncTrackTrain::UpdateTrainVelocity( CPathTrack *pPrev, CPathTrack *pNext,
 			{
 				float flPrevSpeed = m_flSpeed;
 				float flNextSpeed = m_flDesiredSpeed;
+				float flEndSpeed = m_flDesiredSpeed2;
 
-				if ( flPrevSpeed != flNextSpeed )
+				if (flPrevSpeed != flNextSpeed)
 				{
-					float flSpeedChangeTime = ( abs(flNextSpeed) > abs(flPrevSpeed) ) ? m_flAccelSpeed : m_flDecelSpeed;
-					m_flSpeed = UTIL_Approach( m_flDesiredSpeed, m_flSpeed, flSpeedChangeTime * gpGlobals->frametime );
+					float flSpeedChangeTime = (abs(flNextSpeed) > abs(flPrevSpeed)) ? m_flAccelSpeed : m_flDecelSpeed;
+					m_flSpeed = UTIL_Approach(m_flDesiredSpeed, m_flSpeed, flSpeedChangeTime * gpGlobals->frametime);
+				}
+
+				if (fabs(m_flSpeed) < 2 && flNextSpeed != flEndSpeed) { //We've almost reached the end of the first speed acceleration, stop
+					SetLocalVelocity(Vector(0, 0, 0)); //Reset our velocity
+					SetDirForward(flEndSpeed >= 0);
+
+					dir_changed = true; //Commmunicate to the function that called us, that we've changed directions
+					
+					m_flSpeed = 0.1f * m_dir;
+					m_flDesiredSpeed = flEndSpeed;
+					return; //Do not apply the change to the velocity, it will get applied later on
+					
 				}
 			}
 			else if ( pPrev && pNext )
@@ -2293,7 +2324,6 @@ void CFuncTrackTrain::Next( void )
 		m_flSpeed = 0;
 		return;
 	}
-
 	SoundUpdate();
 
 	//
@@ -2341,10 +2371,11 @@ void CFuncTrackTrain::Next( void )
 
 	if ( pNext )
 	{
-		UpdateTrainVelocity( pNext, pNextNext, nextPos, gpGlobals->frametime );
+		bool dir_changed = false;
+		UpdateTrainVelocity( pNext, pNextNext, nextPos, gpGlobals->frametime, dir_changed);
 		UpdateTrainOrientation( pNext, pNextNext, nextPos, gpGlobals->frametime );
 
-		if ( pNext != m_ppath )
+		if ( pNext != m_ppath && !dir_changed) //Make sure we haven't just changed directions
 		{
 			//
 			// We have reached a new path track. Fire its OnPass output.
@@ -2374,6 +2405,25 @@ void CFuncTrackTrain::Next( void )
 	}
 	else
 	{
+		if (m_flDesiredSpeed != m_flDesiredSpeed2) {
+			//We reached the end but we need to reverse
+			
+			//Same code as in UpdateTrainVelocity
+			SetLocalVelocity(Vector(0, 0, 0)); //Reset our velocity
+			SetDirForward(m_flDesiredSpeed2 >= 0);
+
+			m_flSpeed = 0.1f * m_dir;
+			m_flDesiredSpeed = m_flDesiredSpeed2;
+
+			//Set next think
+			m_OnNext.FireOutput(pNext, this);
+
+			SetThink(&CFuncTrackTrain::Next);
+			SetMoveDoneTime(0.5);
+			SetNextThink(gpGlobals->curtime);
+			SetMoveDone(NULL);
+			return;
+		}
 		//
 		// We've reached the end of the path, stop.
 		//
