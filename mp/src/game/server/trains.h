@@ -94,7 +94,7 @@ public:
 
 	bool IsDirForward();
 	void SetDirForward( bool bForward );
-	void SetSpeed( float flSpeed, bool bAccel = false );
+	void SetSpeed( float flSpeed, bool bAccel = false, int desired_speed_direction = 1 );
 	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void SetSpeedDirAccel( float flNewSpeed );
 	
@@ -156,7 +156,7 @@ public:
 private:
 
 	TrainVelocityType_t GetTrainVelocityType();
-	void UpdateTrainVelocity( CPathTrack *pnext, CPathTrack *pNextNext, const Vector &nextPos, float flInterval );
+	void UpdateTrainVelocity( CPathTrack *pnext, CPathTrack *pNextNext, const Vector &nextPos, float flInterval, bool &dir_changed );
 
 	TrainOrientationType_t GetTrainOrientationType();
 	void UpdateTrainOrientation( CPathTrack *pnext, CPathTrack *pNextNext, const Vector &nextPos, float flInterval );
@@ -200,6 +200,7 @@ private:
 
 	bool		m_bManualSpeedChanges;		// set when we want to send entity IO to govern speed and obey our TrainVelocityType_t
 	float		m_flDesiredSpeed;			// target speed, when m_bManualSpeedChanges is set
+	float		m_flDesiredSpeed2;			// Used when the train is making a double speed acceleration, for example 1 -> -1 (which in code resolves to 1 -> 0 -> -1) | Stores the desired velocity at the actual end
 	float		m_flSpeedChangeTime;
 	float		m_flAccelSpeed;
 	float		m_flDecelSpeed;
