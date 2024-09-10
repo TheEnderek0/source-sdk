@@ -2405,6 +2405,25 @@ void CFuncTrackTrain::Next( void )
 	}
 	else
 	{
+		if (m_flDesiredSpeed != m_flDesiredSpeed2) {
+			//We reached the end but we need to reverse
+			
+			//Same code as in UpdateTrainVelocity
+			SetLocalVelocity(Vector(0, 0, 0)); //Reset our velocity
+			SetDirForward(m_flDesiredSpeed2 >= 0);
+
+			m_flSpeed = 0.1f * m_dir;
+			m_flDesiredSpeed = m_flDesiredSpeed2;
+
+			//Set next think
+			m_OnNext.FireOutput(pNext, this);
+
+			SetThink(&CFuncTrackTrain::Next);
+			SetMoveDoneTime(0.5);
+			SetNextThink(gpGlobals->curtime);
+			SetMoveDone(NULL);
+			return;
+		}
 		//
 		// We've reached the end of the path, stop.
 		//
